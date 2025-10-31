@@ -18,6 +18,20 @@ Read-only listener for TEYES/HiWorld CAN broadcasts exposed as Android Intents. 
 
 Android min API 28+, Flutter 3.x.
 
+## Emulator/Device test mode (no TEYES connected)
+
+You can simulate CAN updates on any Android device/emulator:
+
+1. Launch the app: `flutter run`
+2. Tap the Play icon in the top-right (Start Test) to begin emitting synthetic broadcasts every 500 ms
+3. The header will show changing RPM/Speed and the list will populate with synthetic messages
+4. Tap the Stop icon to stop the generator
+
+Implementation notes:
+- The Flutter UI toggles a `MethodChannel('teyes_can_control')` calling `startTest`/`stopTest`.
+- Native side sends an `Intent` using the first entry in `candidateActions`, with extras like `rpm`, `speed`, `gear`, etc. The same dynamic `BroadcastReceiver` receives it, exercising the full pipeline.
+- If broadcast sending fails, it falls back to emitting directly to the `EventChannel`.
+
 ## How to discover the correct broadcast action names (adb logcat)
 
 Action names vary by firmware. Use `adb logcat` to discover which broadcasts your unit emits and then add them to the Kotlin `candidateActions` list.

@@ -31,6 +31,9 @@ object TeyesBroadcastBridge {
     private var eventSink: EventChannel.EventSink? = null
     private var broadcastReceiver: BroadcastReceiver? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val testHandler = Handler(Looper.getMainLooper())
+    private var testRunnable: Runnable? = null
+    private var isTesting: Boolean = false
 
     fun attach(sink: EventChannel.EventSink) {
         eventSink = sink
@@ -90,6 +93,56 @@ object TeyesBroadcastBridge {
             }
         }
         broadcastReceiver = null
+    }
+
+    fun startTest(context: Context) {
+        if (isTesting) return
+        isTesting = true
+        val appContext = context.applicationContext
+
+        // Ensure receiver is active so we test the actual broadcast -> receiver -> EventChannel path
+        start(appContext)
+
+        var tick = 0
+        val action = candidateActions.firstOrNull() ?: "com.teyes.canbus.DATA"
+        testRunnable = object : Runnable {
+            override fun run() {
+                if (!isTesting) return
+                tick += 1
+                val rpm = 700 + (tick % 4000) // 700..4699
+                val speed = (tick % 140) // 0..139
+
+                val intent = Intent(action)
+                intent.putExtra("rpm", rpm)
+                intent.putExtra("speed", speed)
+                intent.putExtra("gear", "D")
+                intent.putExtra("fuel_level", 65)
+                val nested = Bundle()
+                nested.putInt("raw0", 0x12)
+                nested.putInt("raw1", 0x34)
+                intent.putExtra("raw_bundle", nested)
+
+                try {
+                    appContext.sendBroadcast(intent)
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Failed to send test broadcast", t)
+                    // Fallback: emit directly if broadcast fails
+                    val payload = buildPayload(intent)
+                    mainHandler.post { eventSink?.success(payload) }
+                }
+
+                testHandler.postDelayed(this, 500L)
+            }
+        }
+        testHandler.post(testRunnable!!)
+        Log.i(TAG, "Started test broadcast generator")
+    }
+
+    fun stopTest(context: Context) {
+        isTesting = false
+        testRunnable?.let { testHandler.removeCallbacks(it) }
+        testRunnable = null
+        Log.i(TAG, "Stopped test broadcast generator")
     }
 
     private fun buildPayload(intent: Intent): Map<String, Any?> {

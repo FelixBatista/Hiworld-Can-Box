@@ -31,6 +31,7 @@ class CanHomePage extends StatefulWidget {
 
 class _CanHomePageState extends State<CanHomePage> {
   static const _channel = EventChannel('teyes_can_stream');
+  static const _control = MethodChannel('teyes_can_control');
 
   StreamSubscription<dynamic>? _subscription;
 
@@ -38,6 +39,7 @@ class _CanHomePageState extends State<CanHomePage> {
   num? _speed;
   final List<Map<String, dynamic>> _messages = <Map<String, dynamic>>[];
   static const int _maxMessages = 200;
+  bool _testMode = false;
 
   @override
   void initState() {
@@ -110,6 +112,13 @@ class _CanHomePageState extends State<CanHomePage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('TEYES Phase B - CAN Listener'),
+        actions: [
+          IconButton(
+            tooltip: _testMode ? 'Stop Test' : 'Start Test',
+            icon: Icon(_testMode ? Icons.stop_circle_outlined : Icons.play_circle_outline),
+            onPressed: _toggleTest,
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -119,6 +128,21 @@ class _CanHomePageState extends State<CanHomePage> {
         ],
       ),
     );
+  }
+
+  Future<void> _toggleTest() async {
+    try {
+      if (_testMode) {
+        await _control.invokeMethod('stopTest');
+      } else {
+        await _control.invokeMethod('startTest');
+      }
+      if (mounted) {
+        setState(() {
+          _testMode = !_testMode;
+        });
+      }
+    } catch (_) {}
   }
 }
 
