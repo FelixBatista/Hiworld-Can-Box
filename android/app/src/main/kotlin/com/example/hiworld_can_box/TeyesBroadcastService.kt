@@ -1,0 +1,182 @@
+package com.example.hiworld_can_box
+
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+import io.flutter.plugin.common.EventChannel
+
+object TeyesBroadcastBridge {
+    private const val TAG = "TeyesCAN"
+
+    // Replace and extend this list as you discover the correct action strings on your device
+    val candidateActions: List<String> = listOf(
+        // Plausible TEYES/HiWorld/RZC/roadrover broadcasts (examples; firmware-dependent)
+        "com.teyes.canbus.DATA",
+        "com.hiworld.canbus.DATA",
+        "com.hiworld.teyes.CAN_DATA",
+        "ru.teyes.can.ACTION_CAN_DATA",
+        "com.teyes.canbus.CAN_INFO",
+        "com.hiworld.teyes.intent.action.CAN_INFO",
+        "com.android.teyes.canbus.ACTION",
+        "com.roadrover.canbus.ACTION_DATA",
+        "com.syu.ms.action.CANBUS",
+        "com.hiworld.can.CAN_INFO"
+    )
+
+    private var eventSink: EventChannel.EventSink? = null
+    private var broadcastReceiver: BroadcastReceiver? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    fun attach(sink: EventChannel.EventSink) {
+        eventSink = sink
+        Log.i(TAG, "EventChannel attached")
+    }
+
+    fun detach() {
+        eventSink = null
+        Log.i(TAG, "EventChannel detached")
+    }
+
+    fun start(context: Context) {
+        if (broadcastReceiver != null) return
+
+        val appContext = context.applicationContext
+
+        broadcastReceiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context?, intent: Intent?) {
+                if (intent == null) return
+                try {
+                    val payload = buildPayload(intent)
+                    // Emit on UI thread for Flutter
+                    mainHandler.post {
+                        eventSink?.success(payload)
+                    }
+                } catch (t: Throwable) {
+                    Log.e(TAG, "Error forwarding CAN intent", t)
+                }
+            }
+        }
+
+        val filter = IntentFilter()
+        for (action in candidateActions) {
+            try {
+                filter.addAction(action)
+            } catch (t: Throwable) {
+                // Ignore malformed action strings
+            }
+        }
+
+        try {
+            appContext.registerReceiver(broadcastReceiver, filter)
+            Log.i(TAG, "Registered BroadcastReceiver for ${candidateActions.size} candidate actions")
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed to register BroadcastReceiver", t)
+        }
+    }
+
+    fun stop(context: Context) {
+        val appContext = context.applicationContext
+        broadcastReceiver?.let {
+            try {
+                appContext.unregisterReceiver(it)
+                Log.i(TAG, "Unregistered BroadcastReceiver")
+            } catch (t: Throwable) {
+                Log.w(TAG, "BroadcastReceiver already unregistered or failed", t)
+            }
+        }
+        broadcastReceiver = null
+    }
+
+    private fun buildPayload(intent: Intent): Map<String, Any?> {
+        val map = mutableMapOf<String, Any?>()
+        map["action"] = intent.action
+        map["timestamp"] = System.currentTimeMillis()
+
+        // Copy all extras into the map (sanitized to supported types)
+        val extras = intent.extras
+        if (extras != null) {
+            for (key in extras.keySet()) {
+                val value = sanitizeValue(extras.get(key))
+                if (value != null) {
+                    map[key] = value
+                }
+            }
+        }
+
+        // Normalize common keys to rpm and speed
+        val normalized = normalizeRpmAndSpeed(extras)
+        normalized["rpm"]?.let { map["rpm"] = it }
+        normalized["speed"]?.let { map["speed"] = it }
+
+        return map
+    }
+
+    private fun sanitizeValue(value: Any?): Any? {
+        return when (value) {
+            null -> null
+            is Int, is Long, is Double, is Float, is Boolean, is String -> value
+            is Short -> value.toInt()
+            is Byte -> value.toInt()
+            is IntArray -> value.toList()
+            is LongArray -> value.toList()
+            is FloatArray -> value.toList()
+            is DoubleArray -> value.toList()
+            is BooleanArray -> value.toList()
+            is Array<*> -> value.map { it?.toString() }
+            is Bundle -> bundleToMap(value)
+            else -> value.toString()
+        }
+    }
+
+    private fun bundleToMap(bundle: Bundle): Map<String, Any?> {
+        val m = mutableMapOf<String, Any?>()
+        for (key in bundle.keySet()) {
+            m[key] = sanitizeValue(bundle.get(key))
+        }
+        return m
+    }
+
+    private fun normalizeRpmAndSpeed(extras: Bundle?): Map<String, Number> {
+        val result = mutableMapOf<String, Number>()
+        if (extras == null) return result
+
+        var rpm: Number? = null
+        var speed: Number? = null
+
+        val rpmCandidates = listOf("rpm", "RPM", "engineRpm", "engine_rpm", "tacho", "tacho_rpm")
+        val speedCandidates = listOf("speed", "Speed", "vehicleSpeed", "vehicle_speed", "veh_speed", "vss")
+
+        for (key in extras.keySet()) {
+            if (rpm == null && rpmCandidates.any { key.contains(it, ignoreCase = true) }) {
+                rpm = coerceNumber(extras.get(key))
+            }
+            if (speed == null && speedCandidates.any { key.contains(it, ignoreCase = true) }) {
+                speed = coerceNumber(extras.get(key))
+            }
+        }
+
+        if (rpm != null) result["rpm"] = rpm
+        if (speed != null) result["speed"] = speed
+        return result
+    }
+
+    private fun coerceNumber(value: Any?): Number? {
+        return when (value) {
+            is Int -> value
+            is Long -> value
+            is Float -> value.toDouble()
+            is Double -> value
+            is Short -> value.toInt()
+            is Byte -> value.toInt()
+            is String -> value.toDoubleOrNull() ?: value.toIntOrNull()
+            else -> null
+        }
+    }
+}
+
+
