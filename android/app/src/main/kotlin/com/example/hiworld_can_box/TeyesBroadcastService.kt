@@ -122,14 +122,17 @@ object TeyesBroadcastBridge {
                 nested.putInt("raw1", 0x34)
                 intent.putExtra("raw_bundle", nested)
 
+                // 1) Send broadcast so receiver path is exercised
                 try {
                     appContext.sendBroadcast(intent)
                 } catch (t: Throwable) {
                     Log.w(TAG, "Failed to send test broadcast", t)
-                    // Fallback: emit directly if broadcast fails
-                    val payload = buildPayload(intent)
-                    mainHandler.post { eventSink?.success(payload) }
                 }
+
+                // 2) Always also emit directly to EventChannel so emulator/devices with
+                //    stricter broadcast rules still see test data immediately
+                val payload = buildPayload(intent)
+                mainHandler.post { eventSink?.success(payload) }
 
                 testHandler.postDelayed(this, 500L)
             }
