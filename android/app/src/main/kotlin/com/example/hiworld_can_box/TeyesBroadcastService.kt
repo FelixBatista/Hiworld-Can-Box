@@ -15,17 +15,29 @@ object TeyesBroadcastBridge {
 
     // Replace and extend this list as you discover the correct action strings on your device
     val candidateActions: List<String> = listOf(
-        // Plausible TEYES/HiWorld/RZC/roadrover broadcasts (examples; firmware-dependent)
+        // Plausible TEYES/HiWorld/RZC/SYU/RoadRover broadcasts (firmware-dependent)
+        // TEYES / HiWorld variants
         "com.teyes.canbus.DATA",
-        "com.hiworld.canbus.DATA",
-        "com.hiworld.teyes.CAN_DATA",
-        "ru.teyes.can.ACTION_CAN_DATA",
         "com.teyes.canbus.CAN_INFO",
-        "com.hiworld.teyes.intent.action.CAN_INFO",
         "com.android.teyes.canbus.ACTION",
+        "ru.teyes.can.ACTION_CAN_DATA",
+        "com.hiworld.canbus.DATA",
+        "com.hiworld.can.CAN_INFO",
+        "com.hiworld.teyes.CAN_DATA",
+        "com.hiworld.teyes.intent.action.CAN_INFO",
+        "com.hiworld.teyes.intent.action.CanInfo",
+        // RoadRover / RZC
         "com.roadrover.canbus.ACTION_DATA",
+        "com.roadrover.action.CAN",
+        // SYU / MTCD-ish
         "com.syu.ms.action.CANBUS",
-        "com.hiworld.can.CAN_INFO"
+        "com.syu.canbus.ACTION",
+        // Other common after-market stacks
+        "com.microntek.canbus",
+        "com.zxw.canbus",
+        "com.zt.canbus.ACTION",
+        // Fallback custom action you can test via adb
+        "com.example.hiworld_can_box.TEST_CAN"
     )
 
     private var eventSink: EventChannel.EventSink? = null
@@ -66,6 +78,7 @@ object TeyesBroadcastBridge {
         }
 
         val filter = IntentFilter()
+        filter.priority = 999 // try to receive ordered broadcasts earlier
         for (action in candidateActions) {
             try {
                 filter.addAction(action)
@@ -77,6 +90,14 @@ object TeyesBroadcastBridge {
         try {
             appContext.registerReceiver(broadcastReceiver, filter)
             Log.i(TAG, "Registered BroadcastReceiver for ${candidateActions.size} candidate actions")
+            // Emit a meta event so the Flutter UI can confirm registration
+            mainHandler.post {
+                eventSink?.success(mapOf(
+                    "event" to "receiver_registered",
+                    "timestamp" to System.currentTimeMillis(),
+                    "actions" to candidateActions
+                ))
+            }
         } catch (t: Throwable) {
             Log.e(TAG, "Failed to register BroadcastReceiver", t)
         }
